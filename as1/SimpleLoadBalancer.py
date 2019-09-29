@@ -8,7 +8,6 @@ log = core.getLogger()
 import time
 import random
 import json # addition to read configuration from file
-from threading import Thread
 
 
 class SimpleLoadBalancer(object):
@@ -22,7 +21,6 @@ class SimpleLoadBalancer(object):
         core.openflow.addListeners(self)
         # set class parameters
         # write your code here!!!
-        print "__init__"
         self.lb_mac=lb_mac
         self.service_ip=service_ip
         self.server_ips=server_ips
@@ -35,6 +33,7 @@ class SimpleLoadBalancer(object):
             if y in self.group_to_server_ip:
                 self.group_to_server_ip[y].append(x)
             else:
+                #EDW PREPEI NA VALW ELIF AMA UPARXEI STOUS HOST H IP KAI NA VALW TO ELSE STO AMA DEN UPARXEI :P
                 self.group_to_server_ip[y]=[x]
         pass
 
@@ -42,20 +41,13 @@ class SimpleLoadBalancer(object):
     # respond to switch connection up event
     def _handle_ConnectionUp(self, event):
         for x in self.server_ips:
-            #t=Thread(target=self.send_proxied_arp_request, args=(event.connection, x,))
             self.send_proxied_arp_request(event.connection, x)
-            #t.start()
-        #for t in threads:
-            #t.join()
-        #while len(server_ip_to_mac_port)!=len(self.server_ips):
-            #time.sleep(0.5)
         pass
 
 
     # update the load balancing choice for a certain client
     def update_lb_mapping(self, client_ip):
         # write your code here!!!
-        print "update_lb_mapping"
         self.lb_mapping[client_ip]=random.choice(self.group_to_server_ip[self.user_ip_to_group[client_ip]])
         pass
     
@@ -63,11 +55,11 @@ class SimpleLoadBalancer(object):
     # send ARP reply "proxied" by the controller (on behalf of another machine in network)
     def send_proxied_arp_reply(self, packet, connection, outport, requested_mac):
         # write your code here!!!
-        print "send_proxied_arp_reply"
         if packet.next.protodst==IPAddr(self.service_ip):
             self.ip_to_mac_port[packet.next.protosrc]={'mac':packet.src, 'port':outport}
             r=arp(opcode=2,hwsrc=EthAddr(self.lb_mac),hwdst=EthAddr(requested_mac),protosrc=IPAddr(self.service_ip),protodst=IPAddr(packet.next.protosrc))  
         else:
+            #EDW PREPEI NA VALW ELIF AMA UPARXEI STOUS HOST H IP KAI NA VALW TO ELSE STO AMA DEN UPARXEI :P
             r=arp(opcode=2,hwsrc=EthAddr(self.lb_mac),hwdst=EthAddr(requested_mac),protosrc=packet.next.protodst,protodst=IPAddr(packet.next.protosrc))
         e=ethernet(type=ethernet.ARP_TYPE, src=EthAddr(self.lb_mac),dst=EthAddr(requested_mac))
         e.set_payload(r)
@@ -94,7 +86,6 @@ class SimpleLoadBalancer(object):
     # install flow rule from a certain client to a certain server
     def install_flow_rule_client_to_server(self, packet, connection, outport, client_ip, server_ip, buffer_id=of.NO_BUFFER):
         # write your code here!!!
-        print "install_flow_rule_client_to_server"
         actions=[]
         actions.append(of.ofp_action_dl_addr.set_dst(str(self.ip_to_mac_port[server_ip]['mac'])))
         actions.append(of.ofp_action_dl_addr.set_src(str(self.lb_mac)))
@@ -112,7 +103,6 @@ class SimpleLoadBalancer(object):
     # install flow rule from a certain server to a certain client
     def install_flow_rule_server_to_client(self, packet, connection, outport, server_ip, client_ip, buffer_id=of.NO_BUFFER):
         # write your code here!!!
-        print "install_ flow rule server to client"
         actions=[]
         actions.append(of.ofp_action_dl_addr.set_dst(str(self.ip_to_mac_port[client_ip]['mac'])))
         actions.append(of.ofp_action_dl_addr.set_src(str(self.lb_mac)))
@@ -150,6 +140,7 @@ class SimpleLoadBalancer(object):
                 self.update_lb_mapping(packet.next.srcip)
                 self.install_flow_rule_client_to_server(packet, connection, self.ip_to_mac_port[self.lb_mapping[packet.next.srcip]]['port'], packet.next.srcip, self.lb_mapping[packet.next.srcip], event.ofp.buffer_id)
             else:
+                #EDW PREPEI NA VALW ELIF AMA EINAI KAPOIA IP POU ANOIKEI STOUS HOST KAI NA VALW TO ELSE STO AMA DEN UPARXEI :P
                 self.install_flow_rule_server_to_client(packet, connection, self.ip_to_mac_port[packet.next.dstip]['port'], packet.next.srcip, packet.next.dstip, event.ofp.buffer_id)
             pass
         else:
