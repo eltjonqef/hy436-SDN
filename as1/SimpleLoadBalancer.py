@@ -18,7 +18,8 @@ class SimpleLoadBalancer(object):
                  server_ips = [], user_ip_to_group = {}, server_ip_to_group = {}):
         
         # add the necessary openflow listeners
-        core.openflow.addListeners(self)
+        core.openflow.addListeners(self) 
+
         # set class parameters
         # write your code here!!!
         self.lb_mac=lb_mac
@@ -40,8 +41,10 @@ class SimpleLoadBalancer(object):
 
     # respond to switch connection up event
     def _handle_ConnectionUp(self, event):
-        for x in self.server_ips:
-            self.send_proxied_arp_request(event.connection, x)
+        self.connection = event.connection
+        # write your code here!!!
+        for server_ip in self.server_ips:
+            self.send_proxied_arp_request(event.connection, server_ip)
         pass
 
 
@@ -84,7 +87,7 @@ class SimpleLoadBalancer(object):
 
     
     # install flow rule from a certain client to a certain server
-    def install_flow_rule_client_to_server(self, packet, connection, outport, client_ip, server_ip, buffer_id=of.NO_BUFFER):
+    def install_flow_rule_client_to_server(self, connection, outport, client_ip, server_ip, buffer_id=of.NO_BUFFER):
         # write your code here!!!
         actions=[]
         actions.append(of.ofp_action_dl_addr.set_dst(str(self.ip_to_mac_port[server_ip]['mac'])))
@@ -96,12 +99,12 @@ class SimpleLoadBalancer(object):
         msg.buffer_id=buffer_id
         msg.actions=actions
         msg.match=of.ofp_match(in_port=self.ip_to_mac_port[client_ip]['port'], dl_type=0x800)
-        connection.send(msg)    
+        connection.send(msg)
         pass
 
 
     # install flow rule from a certain server to a certain client
-    def install_flow_rule_server_to_client(self, packet, connection, outport, server_ip, client_ip, buffer_id=of.NO_BUFFER):
+    def install_flow_rule_server_to_client(self, connection, outport, server_ip, client_ip, buffer_id=of.NO_BUFFER):
         # write your code here!!!
         actions=[]
         actions.append(of.ofp_action_dl_addr.set_dst(str(self.ip_to_mac_port[client_ip]['mac'])))
@@ -123,6 +126,7 @@ class SimpleLoadBalancer(object):
         packet = event.parsed
         connection = event.connection
         inport = event.port
+        
         if packet.type == packet.ARP_TYPE:
             # write your code here!!!
             if packet.next.opcode==1:
@@ -134,14 +138,19 @@ class SimpleLoadBalancer(object):
                 return
             pass
         elif packet.type == packet.IP_TYPE:
-            if packet.next.dstip==IPAddr("10.1.2.3"):
+            dstIP=packet.next.dstip
+            srcIP=packet.next.srcip
+            # write your code here!!!
+            if dstIP==self.service_ip and srcIP in self.user_ip_to_group:
                 while packet.next.srcip not in self.ip_to_mac_port:
                     time.sleep(0.001)
                 self.update_lb_mapping(packet.next.srcip)
-                self.install_flow_rule_client_to_server(packet, connection, self.ip_to_mac_port[self.lb_mapping[packet.next.srcip]]['port'], packet.next.srcip, self.lb_mapping[packet.next.srcip], event.ofp.buffer_id)
+                self.install_flow_rule_client_to_server(connection, self.ip_to_mac_port[self.lb_mapping[packet.next.srcip]]['port'], packet.next.srcip, self.lb_mapping[packet.next.srcip], event.ofp.buffer_id)
+            elif srcIP in self.server_ip_to_group and dstIP in self.user_ip_to_group:
+                self.install_flow_rule_server_to_client(connection, self.ip_to_mac_port[packet.next.dstip]['port'], packet.next.srcip, packet.next.dstip, event.ofp.buffer_id)
             else:
-                #EDW PREPEI NA VALW ELIF AMA EINAI KAPOIA IP POU ANOIKEI STOUS HOST KAI NA VALW TO ELSE STO AMA DEN UPARXEI :P
-                self.install_flow_rule_server_to_client(packet, connection, self.ip_to_mac_port[packet.next.dstip]['port'], packet.next.srcip, packet.next.dstip, event.ofp.buffer_id)
+                #EDW PREPEI NA KANW DROP TO PAKETO
+                print "THIS SHOULD BE DROPPED"
             pass
         else:
             log.info("Unknown Packet type: %s" % packet.type)
