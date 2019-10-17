@@ -52,6 +52,7 @@ class SimpleLoadBalancer(object):
     def update_lb_mapping(self, client_ip):
         # write your code here!!!
         self.lb_mapping[client_ip]=random.choice(self.group_to_server_ip[self.user_ip_to_group[client_ip]])
+        log.info("Created flow rule and selected server %s for client %s" % (self.lb_mapping[client_ip], client_ip))
         pass
     
 
@@ -98,7 +99,7 @@ class SimpleLoadBalancer(object):
         msg.idle_timeout=10
         msg.buffer_id=buffer_id
         msg.actions=actions
-        msg.match=of.ofp_match(in_port=self.ip_to_mac_port[client_ip]['port'], dl_type=0x800)
+        msg.match=of.ofp_match(in_port=self.ip_to_mac_port[client_ip]['port'] ,nw_dst=self.service_ip, nw_src=client_ip, dl_src=self.ip_to_mac_port[client_ip]['mac'], dl_dst=self.lb_mac,dl_type=0x800)
         connection.send(msg)
         pass
 
@@ -116,9 +117,20 @@ class SimpleLoadBalancer(object):
         msg.buffer_id=buffer_id
         msg.actions=actions
         #UPARXEI THEMA EDW BAINOUN KAI APO TIN IDIA PORTA
-        msg.match=of.ofp_match(in_port=self.ip_to_mac_port[server_ip]['port'], dl_type=0x800)
+        msg.match=of.ofp_match(in_port=self.ip_to_mac_port[server_ip]['port'], nw_dst=client_ip, nw_src=server_ip, dl_src=self.ip_to_mac_port[server_ip]['mac'],dl_dst=self.lb_mac, dl_type=0x800)
         connection.send(msg)
         pass
+
+    def install_flow_for_dropping(self, connection, outport, srcip, dstip, buffer_id):
+        log.info("Dropping and creating rule for packet of IP which is not included in configuration file or packet that does not follow the client-> server rule")
+        actions=[]
+        actions.append(of.ofp_action_output(port = outport))
+        msg=of.ofp_flow_mod()
+        msg.idle_timeout=10
+        msg.actions=actions
+        print self.ip_to_mac_port
+        msg.match=of.ofp_match(nw_src=srcip, nw_dst=dstip, dl_src=self.ip_to_mac_port[srcip]['mac'], dl_dst=self.lb_mac, in_port=outport, dl_type=0x800)
+        connection.send(msg)
 
 
     # main packet-in handling routine
@@ -133,6 +145,7 @@ class SimpleLoadBalancer(object):
                 self.send_proxied_arp_reply(packet, connection, inport, packet.next.hwsrc)
             elif packet.next.opcode==2:
                 self.ip_to_mac_port[packet.next.protosrc]={'mac':packet.src, 'port':inport}
+                log.info("Recieved ARP reply from server %s" % packet.next.protosrc)
             else:
                 log.info("Unknown ARP opcode: %s" % packet.next.opcode)
                 return
@@ -150,7 +163,7 @@ class SimpleLoadBalancer(object):
                 self.install_flow_rule_server_to_client(connection, self.ip_to_mac_port[packet.next.dstip]['port'], packet.next.srcip, packet.next.dstip, event.ofp.buffer_id)
             else:
                 #EDW PREPEI NA KANW DROP TO PAKETO
-                print "THIS SHOULD BE DROPPED"
+                self.install_flow_for_dropping(connection, inport, srcIP, dstIP, event.ofp.buffer_id)
             pass
         else:
             log.info("Unknown Packet type: %s" % packet.type)
