@@ -27,7 +27,8 @@ class SimpleLoadBalancer(object):
         self.server_ips=server_ips
         self.user_ip_to_group=user_ip_to_group
         self.server_ip_to_group=server_ip_to_group
-        self.ip_to_mac_port={}
+        self.client_ip_to_mac_port={}
+        self.server_ip_to_mac_port={}
         self.group_to_server_ip={}
         self.lb_mapping={}
         for x,y in self.server_ip_to_group.items():
@@ -52,7 +53,8 @@ class SimpleLoadBalancer(object):
     def update_lb_mapping(self, client_ip):
         # write your code here!!!
         self.lb_mapping[client_ip]=random.choice(self.group_to_server_ip[self.user_ip_to_group[client_ip]])
-        log.info("Created flow rule and selected server %s for client %s" % (self.lb_mapping[client_ip], client_ip))
+        self.lb_mapping[self.lb_mapping[client_ip]]=client_ip
+        log.info("Update load balancer mapping, selected server %s for client %s and created flow rule" % (self.lb_mapping[client_ip], client_ip))
         pass
     
 
@@ -60,10 +62,11 @@ class SimpleLoadBalancer(object):
     def send_proxied_arp_reply(self, packet, connection, outport, requested_mac):
         # write your code here!!!
         if packet.next.protodst==IPAddr(self.service_ip):
-            self.ip_to_mac_port[packet.next.protosrc]={'mac':packet.src, 'port':outport}
+            log.info("Received ARP request from client %s" % packet.src)
+            self.client_ip_to_mac_port[packet.next.protosrc]={'mac':packet.src, 'port':outport}
             r=arp(opcode=2,hwsrc=EthAddr(self.lb_mac),hwdst=EthAddr(requested_mac),protosrc=IPAddr(self.service_ip),protodst=IPAddr(packet.next.protosrc))  
         else:
-            #EDW PREPEI NA VALW ELIF AMA UPARXEI STOUS HOST H IP KAI NA VALW TO ELSE STO AMA DEN UPARXEI :P
+            log.info("Received ARP request from server %s" % packet.src)
             r=arp(opcode=2,hwsrc=EthAddr(self.lb_mac),hwdst=EthAddr(requested_mac),protosrc=packet.next.protodst,protodst=IPAddr(packet.next.protosrc))
         e=ethernet(type=ethernet.ARP_TYPE, src=EthAddr(self.lb_mac),dst=EthAddr(requested_mac))
         e.set_payload(r)
@@ -91,7 +94,7 @@ class SimpleLoadBalancer(object):
     def install_flow_rule_client_to_server(self, connection, outport, client_ip, server_ip, buffer_id=of.NO_BUFFER):
         # write your code here!!!
         actions=[]
-        actions.append(of.ofp_action_dl_addr.set_dst(str(self.ip_to_mac_port[server_ip]['mac'])))
+        actions.append(of.ofp_action_dl_addr.set_dst(str(self.server_ip_to_mac_port[server_ip]['mac'])))
         actions.append(of.ofp_action_dl_addr.set_src(str(self.lb_mac)))
         actions.append(of.ofp_action_nw_addr.set_dst(str(server_ip)))
         actions.append(of.ofp_action_output(port = outport))
@@ -99,7 +102,7 @@ class SimpleLoadBalancer(object):
         msg.idle_timeout=10
         msg.buffer_id=buffer_id
         msg.actions=actions
-        msg.match=of.ofp_match(in_port=self.ip_to_mac_port[client_ip]['port'] ,nw_dst=self.service_ip, nw_src=client_ip, dl_src=self.ip_to_mac_port[client_ip]['mac'], dl_dst=self.lb_mac,dl_type=0x800)
+        msg.match=of.ofp_match(in_port=self.client_ip_to_mac_port[client_ip]['port'] ,nw_dst=self.service_ip, nw_src=client_ip, dl_src=self.client_ip_to_mac_port[client_ip]['mac'], dl_dst=self.lb_mac,dl_type=0x800)
         connection.send(msg)
         pass
 
@@ -108,16 +111,14 @@ class SimpleLoadBalancer(object):
     def install_flow_rule_server_to_client(self, connection, outport, server_ip, client_ip, buffer_id=of.NO_BUFFER):
         # write your code here!!!
         actions=[]
-        actions.append(of.ofp_action_dl_addr.set_dst(str(self.ip_to_mac_port[client_ip]['mac'])))
+        actions.append(of.ofp_action_dl_addr.set_dst(str(self.client_ip_to_mac_port[client_ip]['mac'])))
         actions.append(of.ofp_action_dl_addr.set_src(str(self.lb_mac)))
         actions.append(of.ofp_action_nw_addr.set_src(str(self.service_ip)))
         actions.append(of.ofp_action_output(port = outport))
         msg=of.ofp_flow_mod()
         msg.idle_timeout=10
-        msg.buffer_id=buffer_id
         msg.actions=actions
-        #UPARXEI THEMA EDW BAINOUN KAI APO TIN IDIA PORTA
-        msg.match=of.ofp_match(in_port=self.ip_to_mac_port[server_ip]['port'], nw_dst=client_ip, nw_src=server_ip, dl_src=self.ip_to_mac_port[server_ip]['mac'],dl_dst=self.lb_mac, dl_type=0x800)
+        msg.match=of.ofp_match(in_port=self.server_ip_to_mac_port[server_ip]['port'], nw_dst=client_ip, nw_src=server_ip, dl_src=self.server_ip_to_mac_port[server_ip]['mac'],dl_dst=self.lb_mac, dl_type=0x800)
         connection.send(msg)
         pass
 
@@ -128,8 +129,7 @@ class SimpleLoadBalancer(object):
         msg=of.ofp_flow_mod()
         msg.idle_timeout=10
         msg.actions=actions
-        print self.ip_to_mac_port
-        msg.match=of.ofp_match(nw_src=srcip, nw_dst=dstip, dl_src=self.ip_to_mac_port[srcip]['mac'], dl_dst=self.lb_mac, in_port=outport, dl_type=0x800)
+        msg.match=of.ofp_match(nw_src=srcip, nw_dst=dstip, in_port=outport, dl_type=0x800)
         connection.send(msg)
 
 
@@ -141,11 +141,12 @@ class SimpleLoadBalancer(object):
         
         if packet.type == packet.ARP_TYPE:
             # write your code here!!!
-            if packet.next.opcode==1:
-                self.send_proxied_arp_reply(packet, connection, inport, packet.next.hwsrc)
-            elif packet.next.opcode==2:
-                self.ip_to_mac_port[packet.next.protosrc]={'mac':packet.src, 'port':inport}
-                log.info("Recieved ARP reply from server %s" % packet.next.protosrc)
+            if packet.next.opcode==1: #if arp request
+                if packet.next.protodst==IPAddr(self.service_ip) or (IPAddr(packet.next.protosrc) in self.server_ip_to_group and IPAddr(packet.next.protodst) in self.client_ip_to_mac_port):
+                    self.send_proxied_arp_reply(packet, connection, inport, packet.next.hwsrc)
+            elif packet.next.opcode==2: #if arp reply
+                self.server_ip_to_mac_port[packet.next.protosrc]={'mac':packet.src, 'port':inport}
+                log.info("Received ARP reply from server %s" % packet.next.protosrc)
             else:
                 log.info("Unknown ARP opcode: %s" % packet.next.opcode)
                 return
@@ -154,15 +155,13 @@ class SimpleLoadBalancer(object):
             dstIP=packet.next.dstip
             srcIP=packet.next.srcip
             # write your code here!!!
-            if dstIP==self.service_ip and srcIP in self.user_ip_to_group:
-                while packet.next.srcip not in self.ip_to_mac_port:
+            if dstIP==self.service_ip and srcIP in self.user_ip_to_group: #if traffic starting from user(json file) and traffic is intended for service ip
+                while packet.next.srcip not in self.client_ip_to_mac_port: #python is slow(?), sometimes the traffic comes before saving to dictionary
                     time.sleep(0.001)
                 self.update_lb_mapping(packet.next.srcip)
-                self.install_flow_rule_client_to_server(connection, self.ip_to_mac_port[self.lb_mapping[packet.next.srcip]]['port'], packet.next.srcip, self.lb_mapping[packet.next.srcip], event.ofp.buffer_id)
-            elif srcIP in self.server_ip_to_group and dstIP in self.user_ip_to_group:
-                self.install_flow_rule_server_to_client(connection, self.ip_to_mac_port[packet.next.dstip]['port'], packet.next.srcip, packet.next.dstip, event.ofp.buffer_id)
-            else:
-                #EDW PREPEI NA KANW DROP TO PAKETO
+                self.install_flow_rule_server_to_client(connection, self.client_ip_to_mac_port[srcIP]['port'], self.lb_mapping[srcIP], srcIP, event.ofp.buffer_id)
+                self.install_flow_rule_client_to_server(connection, self.server_ip_to_mac_port[self.lb_mapping[srcIP]]['port'], srcIP, self.lb_mapping[srcIP], event.ofp.buffer_id)               
+            else: #drop packet in case it is not starting from client, or not intended for service ip
                 self.install_flow_for_dropping(connection, inport, srcIP, dstIP, event.ofp.buffer_id)
             pass
         else:
