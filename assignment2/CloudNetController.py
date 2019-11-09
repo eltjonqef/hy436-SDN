@@ -282,30 +282,28 @@ class CloudNetController (EventMixin):
     def install_end_to_end_IP_path(self, event, dst_dpid, final_port, packet):
         #WRITE YOUR CODE HERE!
         protocol_num=0
-        print("O CONTROLLER PHRE PAKETO")
         if (packet.find('tcp')):
             protocol_num=6
         else:
             protocol_num=17
         pathList=self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][0]
-        pathLen=len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][0])-1
-        match=of.ofp_match(nw_src=packet.next.srcip, nw_dst=packet.next.dstip,dl_type=0x800)
-        for path in range(len(pathList)-1):
-            print("VAZW PATH GIA TO SWITCH")
-            index=pathLen-path
-            print(pathList[index])
-            self.switches[pathList[index]].install_output_flow_rule(self.sw_sw_ports[pathList[index-1], pathList[index]], match, idle_timeout=10)
-        print("EGKATHISTW RULE GIA TO SWITCH")
-        print(self.arpmap[packet.next.srcip][1])
-        self.switches[self.arpmap[packet.next.srcip][1]].install_output_flow_rule(final_port, match, idle_timeout=10)
+        log.info("Selected path: %s for %s protocol" % (pathList, PROTO_NUMS[protocol_num]))
+        pathLen=len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][0])-2
+        match=of.ofp_match(nw_src=IPAddr(packet.next.srcip), nw_dst=IPAddr(packet.next.dstip),dl_type=0x800)
+
         if(int(self.arpmap[packet.next.dstip][1])==int(event.dpid)):
-            print("GAMW T SPITI")
-            self.switches[self.arpmap[packet.next.srcip][1]].send_packet(final_port, packet)
+            self.switches[event.dpid].install_output_flow_rule(final_port, match, idle_timeout=10)
+            self.switches[event.dpid].send_packet(final_port, packet)
         else:
-            print("CYKA")
-            print(self.sw_sw_ports[pathList[pathList.index(event.dpid)],pathList[pathList.index(event.dpid)+1]])
-            print("BLYET")
-            self.switches[event.dpid].send_packet(self.sw_sw_ports[pathList[pathList.index(event.dpid)],pathList[pathList.index(event.dpid)+1]], packet)
+            srcSwitch=-1
+            dstSwitch=-1
+            for node in range(len(pathList)-1):
+                index=pathLen-node
+                self.switches[pathList[index]].install_output_flow_rule(self.sw_sw_ports[pathList[index], pathList[index+1]], match, idle_timeout=10)
+                if(int(pathList[index])==int(event.dpid)):
+                    srcSwitch=pathList[index]
+                    dstSwitch=pathList[index+1]
+            self.switches[srcSwitch].send_packet(self.sw_sw_ports[srcSwitch, dstSwitch], packet)
         pass
 
         
@@ -485,7 +483,7 @@ class SwitchWithPaths (EventMixin):
     def send_arp_reply(self, packet, dst_port, req_mac):
         #WRITE YOUR CODE HERE!
         r=arp(opcode=2, hwsrc=req_mac, hwdst=packet.src, protosrc=packet.next.protodst, protodst=packet.next.protosrc)
-        e=ethernet(type=ethernet.ARP_TYPE, src=packet.dst,dst=packet.src)
+        e=ethernet(type=ethernet.ARP_TYPE, src=req_mac,dst=packet.src)
         e.set_payload(r)
         self.send_packet(dst_port, e.pack())
         pass

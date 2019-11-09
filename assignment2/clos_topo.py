@@ -56,7 +56,7 @@ class ClosTopo(Topo):
         #WRITE YOUR CODE HERE!
         counter=1
         for edge in edgeList:
-            for h in range(fanout):
+            for h in range(2):
                 host=self.addHost('h%s'%(counter))
                 counter=counter+1
                 self.addLink(host, edge)
