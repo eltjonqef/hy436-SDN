@@ -22,44 +22,45 @@ class ClosTopo(Topo):
        
         "Set up Core and Aggregate level, Connection Core - Aggregation level"
         #WRITE YOUR CODE HERE!
-        counter =1
-        coreList=[]
-        aggregationList=[]
-        edgeList=[]
-        for core in range(cores):
-            coreList.append(self.addSwitch('c%s'%(counter)))
+        corelist=[]
+        aggregatelist=[]
+        edgelist=[]
+        counter=1
+        for switch in range(cores):
+            corelist.append(self.addSwitch('c%s'%(counter)))
             counter=counter+1
-        
-        for aggregation in range(fanout):
-            for core in coreList:
-                aggregationList.append(self.addSwitch('a%s'%(counter)))
-                counter=counter+1
 
-        for core in coreList:    
-            for aggregation in aggregationList:
-                self.addLink(aggregation, core)
+        for core in corelist:
+            for switch in range(fanout):
+                aggregatelist.append(self.addSwitch('a%s'%(counter)))
+                counter=counter+1
+            
+        for core in corelist:
+            for aggregate in aggregatelist:
+                self.addLink(core, aggregate)
+
         pass
 
         "Set up Edge level, Connection Aggregation - Edge level "
         #WRITE YOUR CODE HERE!
-
-        for edge in range(fanout):
-            for aggregation in aggregationList:
-                edgeList.append(self.addSwitch('e%s'%(counter)))
+        for aggregate in aggregatelist:
+            for switch in range(fanout):
+                edgelist.append(self.addSwitch('e%s'%(counter)))
                 counter=counter+1
-        for aggregation in aggregationList:
-            for edge in edgeList:
-                self.addLink(edge, aggregation)
+        
+        for aggregate in aggregatelist:
+            for edge in edgelist:
+                self.addLink(aggregate, edge)
         pass
         
+        counter=1
         "Set up Host level, Connection Edge - Host level "
         #WRITE YOUR CODE HERE!
-        counter=1
-        for edge in edgeList:
-            for h in range(2):
-                host=self.addHost('h%s'%(counter))
+        for edge in edgelist:
+            for host in range(2):
+                temp=self.addHost('h%s'%(counter))
+                self.addLink(edge, temp)
                 counter=counter+1
-                self.addLink(host, edge)
         pass
 	
 
@@ -71,7 +72,7 @@ def setup_clos_topo(fanout=2, cores=1):
     net = Mininet(topo=topo, controller=lambda name: RemoteController('c0', "127.0.0.1"), autoSetMacs=True, link=TCLink)
     net.start()
     time.sleep(20) #wait 20 sec for routing to converge
-    net.pingAll()  #test all to all ping and learn the ARP info over this process
+    #net.pingAll()  #test all to all ping and learn the ARP info over this process
     CLI(net)       #invoke the mininet CLI to test your own commands
     net.stop()     #stop the emulation (in practice Ctrl-C from the CLI 
                    #and then sudo mn -c will be performed by programmer)

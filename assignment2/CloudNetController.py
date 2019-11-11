@@ -158,16 +158,19 @@ class CloudNetController (EventMixin):
                 return
 
             if packet.next.opcode == arp.REQUEST:
-                log.info("Handling ARP packet: %s requests the MAC of %s" % (str(srcip), str(dstip)))
+                #log.info("Handling ARP packet: %s requests the MAC of %s" % (str(srcip), str(dstip)))
                 self.update_learned_arp_info(packet, dpid, inport)
 
                 #FIREWALL functionality
                 if self.firewall_capability:
                     try:
                         #WRITE YOUR CODE HERE!
+                        if(self.firewall_policies[srcip]!=self.firewall_policies[dstip]):
+                            self.drop_packets(dpid, packet)
+                            return
                         pass
                     except KeyError:
-                        log.info("IPs not covered by policy!")
+                        #log.info("IPs not covered by policy!")
                         return
 
                 if self.migration_capability:
@@ -176,22 +179,25 @@ class CloudNetController (EventMixin):
                         return
 
                 if dstip in self.arpmap:
-                    log.info("I know where to send the crafted ARP reply!")
+                    #log.info("I know where to send the crafted ARP reply!")
                     (req_mac, req_dpid, req_port) = self.arpmap[dstip]
                     (dst_mac, dst_dpid, dst_port) = self.arpmap[srcip]
                     self.switches[dst_dpid].send_arp_reply(packet, dst_port, req_mac)
                 else:
-                    log.info("Flooding initial ARP request on all switch edges")
+                    #log.info("Flooding initial ARP request on all switch edges")
                     self.flood_on_all_switch_edges(packet, dpid, inport)
 
             elif packet.next.opcode == arp.REPLY:
-                log.info("Handling ARP packet: %s responds to %s" % (str(srcip), str(dstip)))
+                #log.info("Handling ARP packet: %s responds to %s" % (str(srcip), str(dstip)))
                 self.update_learned_arp_info(packet, dpid, inport)
 
                 #FIREWALL functionality
                 if self.firewall_capability:
                     try:
                         #WRITE YOUR CODE HERE!
+                        if(self.firewall_policies[srcip]!=self.firewall_policies[dstip]):
+                            self.drop_packets(dpid, packet)
+                            return
                         pass
                     except KeyError:
                         return
@@ -202,14 +208,14 @@ class CloudNetController (EventMixin):
                         return
 
                 if dstip in self.arpmap.keys():
-                    log.info("I know where to send the initial ARP reply!")
+                    #log.info("I know where to send the initial ARP reply!")
                     (dst_mac, dst_dpid, dst_port) = self.arpmap[dstip]
                     self.switches[dst_dpid].send_packet(dst_port, packet)
                 else:
-                    log.info("Flooding initial ARP reply on all switch edges")
+                    #log.info("Flooding initial ARP reply on all switch edges")
                     self.flood_on_all_switch_edges(packet,dpid,inport)
             else:
-                log.info("Unknown ARP type")
+                #log.info("Unknown ARP type")
                 return
 
         def handle_IP_pktin():
@@ -218,20 +224,23 @@ class CloudNetController (EventMixin):
             if (srcip in self.ignored_IPs) or (dstip in self.ignored_IPs):
                 return
 
-            log.info("Handling IP packet between %s and %s" % (str(srcip), str(dstip)))
+            #log.info("Handling IP packet between %s and %s" % (str(srcip), str(dstip)))
 
             #FIREWALL functionality
             if self.firewall_capability:
                 try:
                     #WRITE YOUR CODE HERE!
+                    if(self.firewall_policies[srcip]!=self.firewall_policies[dstip]):
+                        self.drop_packets(dpid, packet)
+                        return
                     pass
                 except KeyError:
-                    log.info("IPs not covered by policy!")
+                    #log.info("IPs not covered by policy!")
                     return
 
             if self._paths_computed:
                 #print "Routing calculations have converged"
-                log.info("Path requested for flow %s-->%s" % (str(srcip), str(dstip)))
+                #log.info("Path requested for flow %s-->%s" % (str(srcip), str(dstip)))
 
                 if dstip in self.arpmap: #I know where to send the packet
                     (dst_mac, dst_dpid, dst_port) = self.arpmap[dstip]
@@ -242,16 +251,16 @@ class CloudNetController (EventMixin):
                         if dstip in self.old_migrated_IPs:
                             (dst_mac, dst_dpid, dst_port) = self.arpmap[self.old_migrated_IPs[dstip]]
                             #install path to new server and change packet headers
-                            log.info("Installing migrated forward path towards: old IP: %s, new IP: %s" % (str(dstip), str(self.old_migrated_IPs[dstip])))
+                            #log.info("Installing migrated forward path towards: old IP: %s, new IP: %s" % (str(dstip), str(self.old_migrated_IPs[dstip])))
                             self.install_migrated_end_to_end_IP_path(event, dst_dpid, dst_port, packet, forward_path=True)
-                            log.info("Forward migrated path installed")
+                            #log.info("Forward migrated path installed")
 
                         #IP packet comes from new server after migration is done
                         elif srcip in self.new_migrated_IPs:
                             (dst_mac, dst_dpid, dst_port) = self.arpmap[dstip]
-                            log.info("Installing migrated reverse path from: old IP: %s, new IP: %s" % (str(srcip), str(self.new_migrated_IPs[srcip])))
+                            #log.info("Installing migrated reverse path from: old IP: %s, new IP: %s" % (str(srcip), str(self.new_migrated_IPs[srcip])))
                             self.install_migrated_end_to_end_IP_path(event, dst_dpid, dst_port, packet, forward_path=False)
-                            log.info("Reverse migrated path installed")
+                            #log.info("Reverse migrated path installed")
                         else:
                             self.install_end_to_end_IP_path(event, dst_dpid, dst_port, packet)
                     else:
@@ -259,7 +268,7 @@ class CloudNetController (EventMixin):
                 else:
                     self.flood_on_all_switch_edges(packet, dpid, inport)
             else:
-                print "Routing calculations have not converged, discarding packet"
+                #print "Routing calculations have not converged, discarding packet"
                 return
 
         #--------------------------------------------------------------------------------------------------------------
@@ -281,29 +290,26 @@ class CloudNetController (EventMixin):
 
     def install_end_to_end_IP_path(self, event, dst_dpid, final_port, packet):
         #WRITE YOUR CODE HERE!
-        protocol_num=0
-        if (packet.find('tcp')):
-            protocol_num=6
+        
+        match=of.ofp_match(nw_src=IPAddr(packet.next.srcip), nw_dst=IPAddr(packet.next.dstip),nw_proto=packet.next.protocol, dl_type=0x800)
+        if(int(self.arpmap[packet.next.srcip][1]==int(self.arpmap[packet.next.dstip][1]))):
+            self.switches[self.arpmap[packet.next.dstip][1]].install_output_flow_rule(final_port, match, idle_timeout=10)
+            self.switches[self.arpmap[packet.next.dstip][1]].send_packet(final_port, packet)
         else:
-            protocol_num=17
-        pathList=self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][0]
-        log.info("Selected path: %s for %s protocol" % (pathList, PROTO_NUMS[protocol_num]))
-        pathLen=len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][0])-2
-        match=of.ofp_match(nw_src=IPAddr(packet.next.srcip), nw_dst=IPAddr(packet.next.dstip),dl_type=0x800)
-
-        if(int(self.arpmap[packet.next.dstip][1])==int(event.dpid)):
-            self.switches[event.dpid].install_output_flow_rule(final_port, match, idle_timeout=10)
-            self.switches[event.dpid].send_packet(final_port, packet)
-        else:
-            srcSwitch=-1
-            dstSwitch=-1
+            protocol_num=0
+            if (packet.next.protocol==6):
+                protocol_num=6
+            else:
+                protocol_num=17
+            choice=random.randrange(len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num]))
+            pathList=self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][choice]
+            log.info("Selected path: %s for %s protocol" % (pathList, PROTO_NUMS[protocol_num]))
+            pathLen=len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][choice])-2
+            self.switches[self.arpmap[packet.next.dstip][1]].install_output_flow_rule(final_port, match, idle_timeout=10)
             for node in range(len(pathList)-1):
                 index=pathLen-node
                 self.switches[pathList[index]].install_output_flow_rule(self.sw_sw_ports[pathList[index], pathList[index+1]], match, idle_timeout=10)
-                if(int(pathList[index])==int(event.dpid)):
-                    srcSwitch=pathList[index]
-                    dstSwitch=pathList[index+1]
-            self.switches[srcSwitch].send_packet(self.sw_sw_ports[srcSwitch, dstSwitch], packet)
+            self.switches[self.arpmap[packet.next.srcip][1]].send_packet(self.sw_sw_ports[pathList[0], pathList[1]], packet)
         pass
 
         
@@ -375,20 +381,21 @@ class CloudNetController (EventMixin):
             if dpid1 in self.adjs[dpid2]:
                 self.adjs[dpid2].remove(dpid1)
 
-        print "Current switch-to-switch ports:"
-        pp(self.sw_sw_ports)
-        print "Current adjacencies:"
-        pp(self.adjs)
+        #print "Current switch-to-switch ports:"
+        #pp(self.sw_sw_ports)
+        #print "Current adjacencies:"
+        #pp(self.adjs)
         self._paths_computed=False
         self.checkPaths()
         if self._paths_computed == False:
-            print "Warning: Disjoint topology, Shortest Path Routing converging"
+            pass
+            #print "Warning: Disjoint topology, Shortest Path Routing converging"
         else:
-            print "Topology connected, Shortest paths (re)computed successfully, Routing converged"
-            print "--------------------------"
-            for dpid in self.switches:
-                self.switches[dpid].printPaths()
-            print "--------------------------"
+            pass
+            ##print "--------------------------"
+            #for dpid in self.switches:
+                #self.switches[dpid].printPaths()
+            #print "--------------------------"
 
     def checkPaths(self):
         if not self._paths_computed:
@@ -436,7 +443,7 @@ class SwitchWithPaths (EventMixin):
                 self._paths_per_proto[dst][proto_num] = [random.choice(self._paths[dst])]
 
     def printPaths(self):
-        for dst in self._paths:
+        """for dst in self._paths:
             equal_paths_number = len(self._paths[dst])
             if equal_paths_number > 1:
                 print "There are %i shortest paths from switch %i to switch %i:" % (equal_paths_number, self.dpid, dst)
@@ -448,6 +455,8 @@ class SwitchWithPaths (EventMixin):
                     for u in path:
                          print "%i," % (u),
                     print ""
+        """
+        pass
 
 
     def connect(self, connection):
@@ -469,7 +478,7 @@ class SwitchWithPaths (EventMixin):
 
     def flood_on_switch_edge(self, packet, no_flood_ports):
         #WRITE YOUR CODE HERE!
-        for port in self.ports: 
+        for port in self.ports:
             if port.name[0]=='e' and (port.port_no not in no_flood_ports) and port.port_no!=65534:
                 self.send_packet(port.port_no, packet)
         pass
@@ -481,9 +490,15 @@ class SwitchWithPaths (EventMixin):
         self.connection.send(msg)
 
     def send_arp_reply(self, packet, dst_port, req_mac):
-        #WRITE YOUR CODE HERE!
-        r=arp(opcode=2, hwsrc=req_mac, hwdst=packet.src, protosrc=packet.next.protodst, protodst=packet.next.protosrc)
-        e=ethernet(type=ethernet.ARP_TYPE, src=req_mac,dst=packet.src)
+        #WRITE YOUR CODE HERE!]
+        r=arp()
+        print(req_mac)
+        r.opcode=2
+        r.hwsrc=EthAddr(req_mac)
+        r.hwdst=packet.src
+        r.protosrc=packet.next.protodst
+        r.protodst=packet.next.protosrc
+        e=ethernet(type=ethernet.ARP_TYPE, src=EthAddr(req_mac), dst=packet.src)
         e.set_payload(r)
         self.send_packet(dst_port, e.pack())
         pass
@@ -525,9 +540,10 @@ class SwitchWithPaths (EventMixin):
 
 def ShortestPaths(switches, adjs):
     #WRITE YOUR CODE HERE!
-    G=nx.DiGraph()
-    for adj in adjs:
-        for neighbor in adjs[adj]:
+    G=nx.Graph()
+    G.add_nodes_from(switches.keys())
+    for adj in adjs.keys():
+        for neighbor in list(adjs[adj]):
             G.add_edge(adj, neighbor)
     try:
         for adj1 in adjs:
