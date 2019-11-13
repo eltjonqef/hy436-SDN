@@ -72,7 +72,7 @@ def setup_clos_topo(fanout=2, cores=1):
     net = Mininet(topo=topo, controller=lambda name: RemoteController('c0', "127.0.0.1"), autoSetMacs=True, link=TCLink)
     net.start()
     time.sleep(20) #wait 20 sec for routing to converge
-    #net.pingAll()  #test all to all ping and learn the ARP info over this process
+    net.pingAll()  #test all to all ping and learn the ARP info over this process
     CLI(net)       #invoke the mininet CLI to test your own commands
     net.stop()     #stop the emulation (in practice Ctrl-C from the CLI 
                    #and then sudo mn -c will be performed by programmer)

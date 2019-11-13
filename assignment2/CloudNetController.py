@@ -40,6 +40,8 @@ class CloudNetController (EventMixin):
         super(EventMixin, self).__init__()
 
         #generic controller information
+        self.migrationarpmap={}
+        self.pathChoice={}
         self.switches = {}     # key=dpid, value = SwitchWithPaths instance
         self.sw_sw_ports = {}  # key = (dpid1,dpid2), value = outport of dpid1
         self.adjs = {}         # key = dpid, value = list of neighbors
@@ -249,7 +251,8 @@ class CloudNetController (EventMixin):
                     if self.migration_capability:
                         #IP packet goes to old server after migration is done
                         if dstip in self.old_migrated_IPs:
-                            (dst_mac, dst_dpid, dst_port) = self.arpmap[self.old_migrated_IPs[dstip]]
+                            #(dst_mac, dst_dpid, dst_port) = self.arpmap[self.old_migrated_IPs[dstip]]
+                            (dst_mac, dst_dpid, dst_port) = self.migrationarpmap[dstip]
                             #install path to new server and change packet headers
                             #log.info("Installing migrated forward path towards: old IP: %s, new IP: %s" % (str(dstip), str(self.old_migrated_IPs[dstip])))
                             self.install_migrated_end_to_end_IP_path(event, dst_dpid, dst_port, packet, forward_path=True)
@@ -301,10 +304,12 @@ class CloudNetController (EventMixin):
                 protocol_num=6
             else:
                 protocol_num=17
-            choice=random.randrange(len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num]))
-            pathList=self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][choice]
-            log.info("Selected path: %s for %s protocol" % (pathList, PROTO_NUMS[protocol_num]))
-            pathLen=len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][choice])-2
+            if(int(event.dpid)==int(self.arpmap[packet.next.srcip][1])):
+                choice=random.randrange(len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num]))
+                self.pathChoice[self.arpmap[packet.next.srcip][1], dst_dpid, protocol_num]=choice
+                log.info("For SourceIP: %s and DestIP: %s, Selected path: %s for %s protocol" % (packet.next.srcip, packet.next.dstip,self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][choice], PROTO_NUMS[protocol_num]))
+            pathList=self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][self.pathChoice[self.arpmap[packet.next.srcip][1], dst_dpid, protocol_num]]
+            pathLen=len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][self.pathChoice[self.arpmap[packet.next.srcip][1], dst_dpid, protocol_num]])-2
             self.switches[self.arpmap[packet.next.dstip][1]].install_output_flow_rule(final_port, match, idle_timeout=10)
             for node in range(len(pathList)-1):
                 index=pathLen-node
@@ -315,30 +320,50 @@ class CloudNetController (EventMixin):
         
     def install_migrated_end_to_end_IP_path(self, event, dst_dpid, dst_port, packet, forward_path=True):
         #WRITE YOUR CODE HERE!
-        """match=of.ofp_match(nw_src=IPAddr(packet.next.srcip), nw_dst=IPAddr(packet.next.dstip),nw_proto=packet.next.protocol, dl_type=0x800)
+        match=of.ofp_match(nw_src=IPAddr(packet.next.srcip), nw_dst=IPAddr(packet.next.dstip),nw_proto=packet.next.protocol, dl_type=0x800)
         if(forward_path==True):
-            if(int(self.arpmap[packet.next.srcip][1]==int(self.arpmap[packet.next.dstip][1]))):
-                self.switches[dst_dpid].install_forward_migration_rule(dst_port, self.arpmap[packet.next.dstip][0], self.old_migrated_IPs[packet.next.dstip], match, idle_timeout=0)
-                self.switches[dst_dpid].send_forward_migrated_packet(dst_port, self.arpmap[packet.next.dstip][0], self.old_migrated_IPs[packet.next.dstip], packet)
+            #We are at the last switch so, we need to rewrite
+            if(int(event.dpid)==int(self.arpmap[self.old_migrated_IPs[packet.next.dstip]][1])):
+                self.switches[dst_dpid].install_forward_migration_rule(dst_port, self.migrationarpmap[packet.next.dstip][0], self.old_migrated_IPs[packet.next.dstip], match, idle_timeout=10)
+                self.switches[dst_dpid].send_forward_migrated_packet(dst_port, self.migrationarpmap[packet.next.dstip][0], self.old_migrated_IPs[packet.next.dstip], packet_data=packet)
             else:
                 protocol_num=0
-            if (packet.next.protocol==6):
-                protocol_num=6
-            else:
-                protocol_num=17
-            choice=random.randrange(len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num]))
-            pathList=self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][choice]
-            log.info("Selected path: %s for %s protocol" % (pathList, PROTO_NUMS[protocol_num]))
-            pathLen=len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][choice])-2
-            self.switches[self.arpmap[packet.next.dstip][1]].install_forward_migration_rule(dst_port, self.arpmap[packet.next.dstip][0], self.old_migrated_IPs[packet.next.dstip],match, idle_timeout=10)
-            for node in range(len(pathList)-1):
-                index=pathLen-node
-                self.switches[pathList[index]].install_forward_migration_rule(self.sw_sw_ports[pathList[index], pathList[index+1]], self.arpmap[packet.next.dstip][0], self.old_migrated_IPs[packet.next.dstip],match, idle_timeout=10)
+                if (packet.next.protocol==6):
+                    protocol_num=6
+                else:
+                    protocol_num=17
+                if(int(event.dpid)==int(self.arpmap[packet.next.srcip][1])):
+                    choice=random.randrange(len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num]))
+                    self.pathChoice[self.arpmap[packet.next.srcip][1], dst_dpid, protocol_num]=choice
+                    log.info("For SourceIP: %s and DestIP: %s, Selected path: %s for %s protocol" % (packet.next.srcip, packet.next.dstip,self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][choice], PROTO_NUMS[protocol_num]))
+                pathList=self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][self.pathChoice[self.arpmap[packet.next.srcip][1], dst_dpid, protocol_num]]
+                pathLen=len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][self.pathChoice[self.arpmap[packet.next.srcip][1], dst_dpid, protocol_num]])-2
+                self.switches[dst_dpid].install_forward_migration_rule(dst_port, self.migrationarpmap[packet.next.dstip][0], self.old_migrated_IPs[packet.next.dstip], match, idle_timeout=10)
+                for node in range(len(pathList)-1):
+                    index=pathLen-node
+                    self.switches[pathList[index]].install_forward_migration_rule(self.sw_sw_ports[pathList[index], pathList[index+1]], packet.dst, packet.next.dstip, match, idle_timeout=10)
+                self.switches[self.arpmap[packet.next.srcip][1]].send_forward_migrated_packet(self.sw_sw_ports[pathList[0], pathList[1]], self.migrationarpmap[packet.next.dstip][0], self.old_migrated_IPs[packet.next.dstip], packet_data=packet)
         else:
-            if(int(self.arpmap[self.new_migrated_IPs[packet.next.srcip]][1]==int(self.arpmap[packet.next.dstip][1]))):
-                self.switches[dst_dpid].install_reverse_migration_rule(dst_port)
-                                    install_reverse_migration_rule(self, outport, src_mac, src_ip, match, idle_timeout=0, hard_timeout=0):
-        """
+            if(int(event.dpid)==int(self.arpmap[packet.next.dstip][1])):
+                self.switches[dst_dpid].install_reverse_migration_rule(dst_port, self.migrationarpmap[packet.next.srcip][0], self.new_migrated_IPs[packet.next.srcip], match, idle_timeout=10)
+                self.switches[dst_dpid].send_reverse_migrated_packet(dst_port, self.migrationarpmap[packet.next.srcip][0], self.new_migrated_IPs[packet.next.srcip], packet_data=packet)
+            else:
+                protocol_num=0
+                if (packet.next.protocol==6):
+                    protocol_num=6
+                else:
+                    protocol_num=17
+                if(int(event.dpid)==int(self.arpmap[packet.next.srcip][1])):
+                    choice=random.randrange(len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num]))
+                    self.pathChoice[self.arpmap[packet.next.srcip][1], dst_dpid, protocol_num]=choice
+                    log.info("For SourceIP: %s and DestIP: %s, Selected path: %s for %s protocol" % (packet.next.srcip, packet.next.dstip,self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][choice], PROTO_NUMS[protocol_num]))
+                pathList=self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][self.pathChoice[self.arpmap[packet.next.srcip][1], dst_dpid, protocol_num]]
+                pathLen=len(self.switches[self.arpmap[packet.next.srcip][1]]._paths_per_proto[dst_dpid][protocol_num][self.pathChoice[self.arpmap[packet.next.srcip][1], dst_dpid, protocol_num]])-2
+                self.switches[dst_dpid].install_reverse_migration_rule(dst_port, self.migrationarpmap[packet.next.srcip][0], self.new_migrated_IPs[packet.next.srcip], match, idle_timeout=10)
+                for node in range(len(pathList)-1):
+                    index=pathLen-node
+                    self.switches[pathList[index]].install_reverse_migration_rule(self.sw_sw_ports[pathList[index], pathList[index+1]], packet.src, packet.next.srcip, match, idle_timeout=10)
+                self.switches[self.arpmap[packet.next.srcip][1]].send_reverse_migrated_packet(self.sw_sw_ports[pathList[0], pathList[1]], packet.src, packet.next.srcip, packet_data=packet)
         pass
 
 
@@ -370,11 +395,10 @@ class CloudNetController (EventMixin):
         log.info("Rules deleted, now new IP e2e paths will be automatically migrated to the new IP %s" % (str(new_IP)))
         self.old_migrated_IPs[old_IP] = new_IP
         self.new_migrated_IPs[new_IP] = old_IP
-        (new_mac, new_dpid, new_inport) = self.arpmap[self.old_migrated_IPs[old_IP]]
-        self.arpmap[old_IP] = (new_mac, new_dpid, new_inport)
-        print(self.arpmap)
-        print(self.old_migrated_IPs)
-        print(self.new_migrated_IPs)
+        self.migrationarpmap[old_IP]= self.arpmap[new_IP]
+        self.migrationarpmap[new_IP]=self.arpmap[old_IP]
+        #(new_mac, new_dpid, new_inport) = self.arpmap[self.old_migrated_IPs[old_IP]]
+        #self.arpmap[old_IP] = (new_mac, new_dpid, new_inport)
         log.info("Arpmap for old ip updated")
 
     def drop_packets(self, dpid, packet):
@@ -549,10 +573,26 @@ class SwitchWithPaths (EventMixin):
 
     def send_forward_migrated_packet(self, outport, dst_mac, dst_ip, packet_data=None):
         #WRITE YOUR CODE HERE!
+        actions=[]
+        actions.append(of.ofp_action_dl_addr.set_dst(str(dst_mac)))
+        actions.append(of.ofp_action_nw_addr.set_dst(str(dst_ip)))
+        actions.append(of.ofp_action_output(port = outport))
+        msg = of.ofp_packet_out(in_port=of.OFPP_NONE)
+        msg.data = packet_data
+        msg.actions=actions
+        self.connection.send(msg)
         pass
 
     def send_reverse_migrated_packet(self, outport, src_mac, src_ip, packet_data=None):
         #WRITE YOUR CODE HERE!
+        actions=[]
+        actions.append(of.ofp_action_dl_addr.set_src(str(src_mac)))
+        actions.append(of.ofp_action_nw_addr.set_src(str(src_ip)))
+        actions.append(of.ofp_action_output(port = outport))
+        msg = of.ofp_packet_out(in_port=of.OFPP_NONE)
+        msg.data = packet_data
+        msg.actions=actions
+        self.connection.send(msg)
         pass
         
     def install_forward_migration_rule(self, outport, dst_mac, dst_ip, match, idle_timeout=0, hard_timeout=0):
@@ -562,11 +602,27 @@ class SwitchWithPaths (EventMixin):
         actions.append(of.ofp_action_nw_addr.set_dst(str(dst_ip)))
         actions.append(of.ofp_action_output(port = outport))
         msg=of.ofp_flow_mod()
-        msg.match=match
+        msg.match = match
+        msg.command = of.OFPFC_MODIFY_STRICT
+        msg.idle_timeout = idle_timeout
+        msg.hard_timeout = hard_timeout
+        msg.actions=actions
+        self.connection.send(msg)
         pass
 
     def install_reverse_migration_rule(self, outport, src_mac, src_ip, match, idle_timeout=0, hard_timeout=0):
         #WRITE YOUR CODE HERE!
+        actions=[]
+        actions.append(of.ofp_action_dl_addr.set_src(str(src_mac)))
+        actions.append(of.ofp_action_nw_addr.set_src(str(src_ip)))
+        actions.append(of.ofp_action_output(port = outport))
+        msg=of.ofp_flow_mod()
+        msg.match = match
+        msg.command = of.OFPFC_MODIFY_STRICT
+        msg.idle_timeout = idle_timeout
+        msg.hard_timeout = hard_timeout
+        msg.actions=actions
+        self.connection.send(msg)
         pass
 
 
@@ -581,7 +637,6 @@ def ShortestPaths(switches, adjs):
         for adj1 in adjs:
             for adj2 in adjs:
                 switches[adj1].appendPaths(adj2, list(nx.all_shortest_paths(G, adj1, adj2)))
-        print("TELEIWSA")
         return True
     except: nx.NetworkXNoPath
     pass
