@@ -244,6 +244,7 @@ public class Hy436Manager implements Hy436Service {
     private void sendPktOut(DeviceId deviceId, PortNumber portNumber, Ethernet ethPkt, MacAddress targetHostMac) {
         TrafficTreatment.Builder treatmentBuilder = DefaultTrafficTreatment.builder();
         if (targetHostMac != null) {
+            log.info(targetHostMac.toString());
             treatmentBuilder.setEthDst(targetHostMac);
         }
         treatmentBuilder.setOutput(portNumber);
@@ -320,18 +321,23 @@ public class Hy436Manager implements Hy436Service {
         switch (monitorDirection) {
             case INCOMING:
                 /* WRITE YOUR CODE HERE */;
-                needsMonitor=true;
+                if(monitoredHosts.contains(getAddress.apply(dst))){
+                    needsMonitor=true;
+                }
                 break;
             case OUTGOING:
                 /* WRITE YOUR CODE HERE */;
-                needsMonitor=true;
+                if(monitoredHosts.contains(getAddress.apply(src))){
+                    needsMonitor=true;
+                }
                 break;
             case BOTH:
-                needsMonitor=true;
             default:
                 /* WRITE YOUR CODE HERE */;
+                if(monitoredHosts.contains(getAddress.apply(src)) || monitoredHosts.contains(getAddress.apply(dst))){
+                    needsMonitor=true;
+                }
         }
-
         /* send the current packet directly to the normal destination (first packet of flow) */
         /* WRITE YOUR CODE HERE */;
         sendPktOut(destLocation.deviceId(), destLocation.port(), ethPkt, null);
@@ -355,21 +361,29 @@ public class Hy436Manager implements Hy436Service {
             also its dst mac address (first packet of flow) */
             /* WRITE YOUR CODE HERE */;
             Ethernet newEthPkt=ethPkt.duplicate();
+            newEthPkt.setDestinationMACAddress(monMac);
+
+            //log.info(monLocation.port().toString());
+            //log.info(monLink.get().src().port().toString());
             sendPktOut(monLocation.deviceId(), monLocation.port(), newEthPkt, monMac);
+            installMonLinkCollectionIntent(src, dst, mon, monPath);
+            RemoveTag(mon);
             /* if source and destination are on different switches, install mon flow objective
                to forward normal traffic along source->destination path, and then
                tag and forward traffic to 2nd switch along source -> monitor path */
             if (normLink.isPresent() && normPath.isPresent()) {
                 /* WRITE YOUR CODE HERE */;
+                installMonForwardObjective(src, dst, mon, monLink, normLink, 0);
             }
             /* if source and destination are on same switch, install mon flow objective
                to forward normal traffic directly to destination,
                tag and forward traffic along source -> monitor path */
             else {
                 /* WRITE YOUR CODE HERE */;
+                installMonForwardObjective(src, dst, mon, monLink, normLink, 1);
             }
             /* install link collection event for source->monitor path */
-            /* WRITE YOUR CODE HERE */;
+            /* WRITE YOUR CODE HERE */;            
         }
     }
 
@@ -436,6 +450,118 @@ public class Hy436Manager implements Hy436Service {
 
         intentSynchronizationService.submit(linkCollectionIntent);
         log.info("Installing Link Collection Intent={}", linkCollectionIntent);
+    }
+
+    private void installMonLinkCollectionIntent(Host src, Host dst, Host mon, Optional<Path> srcMonPath){
+        
+        TrafficSelector selector;
+        TrafficTreatment treatment;
+        TrafficTreatment treatment1;
+        Key key;
+
+        selector=DefaultTrafficSelector.builder()
+        .matchVlanId(MON_VLAN)
+        .build();
+        /*switch (monitorDirection) {
+            case INCOMING:
+                selector.matchIPDst(dst.ipAddresses().stream().findFirst().get().toIpPrefix());
+                break;
+            case OUTGOING:
+                selector.matchIPSrc(src.ipAddresses().stream().findFirst().get().toIpPrefix());
+                break;
+            default:
+                selector.matchIPSrc(src.ipAddresses().stream().findFirst().get().toIpPrefix());
+                selector.matchIPDst(dst.ipAddresses().stream().findFirst().get().toIpPrefix());
+        }*/
+
+        treatment=DefaultTrafficTreatment.builder()
+        //.setEthDst(mon.mac())
+        .pushVlan()
+        .setVlanId(MON_VLAN)
+        .build();
+
+        Set<ConnectPoint> ingress = Sets.newConcurrentHashSet();
+        Set<ConnectPoint> egress = Sets.newConcurrentHashSet();
+
+        ingress.add(src.location());
+        egress.add(mon.location());
+        key=Key.of(src.toString()+'-'+ mon.toString(), appId);
+        LinkCollectionIntent linkCollectionIntent=LinkCollectionIntent.builder()
+        .appId(appId)
+        .key(key)
+        .selector(selector)
+        .treatment(treatment)
+        .links(Sets.newConcurrentHashSet(srcMonPath.get().links()))
+        .ingressPoints(ingress)
+        .egressPoints(egress)
+        .priority(PRIORITY)
+        .constraints(CONSTRAINTS)
+        .build();
+
+        intentSynchronizationService.submit(linkCollectionIntent);
+        log.info("Installing Monitor Link Collection Intent={}", linkCollectionIntent);
+    }
+
+    private void installMonForwardObjective(Host src, Host dst, Host mon, Optional<Link> monLink, Optional<Link> normLink, int mode){
+        TrafficSelector selector;
+        TrafficTreatment treatment;
+        Key key;
+        PortNumber tempPort;
+        selector=DefaultTrafficSelector.builder()
+        .matchEthType(TYPE_IPV4)
+        .matchIPSrc(src.ipAddresses().stream().findFirst().get().toIpPrefix())
+        .matchIPDst(dst.ipAddresses().stream().findFirst().get().toIpPrefix())
+        .build();
+        if(mode==0){
+            tempPort=normLink.get().src().port();
+        }
+        else{
+            tempPort=dst.location().port();
+        }
+        treatment=DefaultTrafficTreatment.builder()
+        .setOutput(tempPort)
+        .pushVlan()
+        .setVlanId(MON_VLAN)
+        .setOutput(monLink.get().src().port())
+        .build();
+
+        ForwardingObjective forwardingObjective=DefaultForwardingObjective.builder()
+        .withSelector(selector)
+        .withTreatment(treatment)
+        .withPriority(1001)
+        .withFlag(ForwardingObjective.Flag.VERSATILE)
+        .fromApp(appId)
+        .add();
+
+        flowObjectiveService.forward(src.location().deviceId(), forwardingObjective);
+        log.info("Installing mon flow objective = {}", forwardingObjective);
+    }
+
+    private void RemoveTag(Host mon){
+        TrafficSelector selector;
+        TrafficTreatment treatment;
+        Key key;
+
+        selector=DefaultTrafficSelector.builder()
+        .matchVlanId(MON_VLAN)
+        .build();
+        
+        treatment=DefaultTrafficTreatment.builder()
+        .popVlan()
+        .setEthDst(mon.mac())
+        .setOutput(mon.location().port())
+        .build();
+
+        ForwardingObjective forwardingObjective=DefaultForwardingObjective.builder()
+        .withSelector(selector)
+        .withTreatment(treatment)
+        .withPriority(1002)
+        .withFlag(ForwardingObjective.Flag.VERSATILE)
+        .fromApp(appId)
+        .add();
+
+        flowObjectiveService.forward(mon.location().deviceId(), forwardingObjective);
+        log.info("Installing mon flow objective = {}", forwardingObjective);
     }
     /**
      * get only the monitored flows from the switch where the monitor is attached
